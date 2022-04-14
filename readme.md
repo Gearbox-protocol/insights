@@ -1,3 +1,3 @@
 # Gearbox Insights 
 
-There we put together all analytics we have
+Here we put together all analytics we have
