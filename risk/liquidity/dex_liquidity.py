@@ -34,6 +34,7 @@ RPC_Endpoint = 'https://mainnet.infura.io/v3/84842078b09946638c03157f83405213'
 UniV2Router = '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'
 UniV3Router = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
 UniV3Fee    = [100, 500, 3000, 10000]
+SushiRouter = '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F'
 
 token_base = {'WETH':'0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
               'WBTC':'0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
@@ -80,44 +81,52 @@ def get_factory(w3, abi, Router):
 def get_token_decimals (w3, abi, token_address, symbol=None):
     token_address = Web3.toChecksumAddress(token_address)
     if token_address not in token_decimals:
-        decimals = w3_eth.eth.contract(address=token_address, abi=abi).functions.decimals().call()
+        decimals = w3.eth.contract(address=token_address, abi=abi).functions.decimals().call()
         token_decimals[token_address] = decimals
         if symbol:
             token_decimals[symbol] = decimals
 
     return token_decimals[token_address]
 
-
-def main():
+def main(w3):
     pools = {}
 
-    factory2 = get_factory(w3_eth, abi, UniV2Router)
-    logging.info(f'factory2: {factory2}')
-    factory3 = get_factory(w3_eth,abi, UniV3Router)
-    logging.info(f'factory3: {factory3}')
+    UniFactory2 = get_factory(w3, abi, UniV2Router)
+    logging.info(f'UniFactory2: {UniFactory2}')
+    UniFactory3 = get_factory(w3,abi, UniV3Router)
+    logging.info(f'UniFactory3: {UniFactory3}')
+    SushiFactory = get_factory(w3,abi, SushiRouter)
+    logging.info(f'SushiRouter: {SushiRouter}')
 
     for symbol0 in token_base:
         token0 = Web3.toChecksumAddress(token_base[symbol0])
-        base_decimals = get_token_decimals(w3_eth, abi, token0, symbol0)
+        base_decimals = get_token_decimals(w3, abi, token0, symbol0)
 
         logging.info(f'pools count= {len(pools)}..')
 
         for symbol1 in token_dict:
             token1 = Web3.toChecksumAddress(token_dict[symbol1])
-            token_decimals = get_token_decimals(w3_eth, abi, token1, symbol1)
+            token_decimals = get_token_decimals(w3, abi, token1, symbol1)
 
-            pool = w3_eth.eth.contract(address=factory2, abi=abi).functions.getPair(token0,token1).call()
-            pools[pool] = {'token'         :symbol1,
-                           'token_decimals':token_decimals,
-                           'base_token'    :symbol0,
-                           'base_decimals' :base_decimals,
-                           'version'       :'Uniswap V2',
-                           'fee' : None,}
+            pool_uni2 = w3.eth.contract(address=UniFactory2, abi=abi).functions.getPair(token0,token1).call()
+            pools[pool_uni2] = {'token'        :symbol1,
+                                'token_decimals':token_decimals,
+                                'base_token'    :symbol0,
+                                'base_decimals' :base_decimals,
+                                'version'       :'Uniswap V2',
+                                'fee' : None,}
+            pool_sushi = w3.eth.contract(address=SushiFactory, abi=abi).functions.getPair(token0,token1).call()
+            pools[pool_sushi] = {'token'       :symbol1,
+                                 'token_decimals':token_decimals,
+                                 'base_token'    :symbol0,
+                                 'base_decimals' :base_decimals,
+                                 'version'       :'Sushiswap',
+                                 'fee' : None,}
 
             multi_getPool = Multicall([
-                                Call(factory3, ['getPool(address,address,uint24)(address)', token0,token1,x], [[x, Web3.toChecksumAddress]]) for x in UniV3Fee
+                                Call(UniFactory3, ['getPool(address,address,uint24)(address)', token0,token1,x], [[x, Web3.toChecksumAddress]]) for x in UniV3Fee
                                 ]
-                                ,_w3 = w3_eth)
+                                ,_w3 = w3)
 
             multi_getPool = multi_getPool()
 
@@ -140,7 +149,7 @@ def main():
                                       [[x, None]]
                                      ) for x in pools
                                 ]
-                                ,_w3 = w3_eth)
+                                ,_w3 = w3)
 
     multi_balanceOwn = multi_balanceOwn()
 
@@ -150,7 +159,7 @@ def main():
                                       [[x, None]]
                                      ) for x in pools
                                 ]
-                                ,_w3 = w3_eth)
+                                ,_w3 = w3)
 
     multi_balanceBase = multi_balanceBase()
 
@@ -172,7 +181,7 @@ if __name__ == '__main__':
     w3_eth = Web3(Web3.HTTPProvider(RPC_Endpoint, request_kwargs={'timeout': 20}))
     logging.info (f'Ethereum connected: {w3_eth.isConnected()}')
 
-    ret = main()
+    ret = main(w3_eth)
 
     df = pd.DataFrame.from_dict(ret, orient = 'index').reset_index().rename(columns = {'index':'pool'})
     df['batchtime'] = datetime.utcnow()
